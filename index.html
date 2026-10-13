@@ -1,85 +1,245 @@
 <!DOCTYPE html>
-<html>
+<html lang="ja">
 <head>
+  <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>QRスキャナ</title>
+  <meta name="theme-color" content="#ffffff">
+  <title>QRコード記録アプリ</title>
 
   <script src="https://unpkg.com/html5-qrcode"></script>
 
   <style>
     body {
       font-family: sans-serif;
-      text-align: center;
-      padding: 10px;
-      background: #f5f5f5;
+      max-width: 560px;
+      margin: 0 auto;
+      padding: 20px;
+      color: #222;
     }
-    #reader {
-      width: 300px;
-      margin: auto;
+
+    h1 {
+      font-size: 1.5rem;
     }
+
     button {
-      font-size: 18px;
-      padding: 10px;
-      margin: 10px;
+      padding: 12px 16px;
+      margin: 5px 5px 5px 0;
+      font-size: 1rem;
+      cursor: pointer;
+    }
+
+    #reader {
+      width: 100%;
+      margin-top: 16px;
+    }
+
+    #status {
+      margin-top: 16px;
+      padding: 12px;
+      background: #f2f2f2;
+      border-radius: 8px;
+      overflow-wrap: anywhere;
+      white-space: pre-wrap;
+    }
+
+    #lastResult {
+      overflow-wrap: anywhere;
+      white-space: pre-wrap;
+    }
+
+    .note {
+      font-size: 0.9rem;
+      color: #555;
     }
   </style>
 </head>
 
 <body>
+  <h1>QRコード記録アプリ</h1>
 
-<h2>QRコード読み取り</h2>
+  <p class="note">
+    カメラを起動し、QRコードを読み取ると、
+    読み取り日時と内容をGoogleドキュメントに記録します。
+  </p>
 
-<button onclick="startScan()">スキャン開始</button>
-<button onclick="stopScan()">停止</button>
+  <button id="startButton">カメラを起動</button>
+  <button id="stopButton" disabled>カメラを停止</button>
 
-<div id="reader"></div>
-<div id="result">待機中</div>
+  <div id="reader"></div>
 
-<script>
-const GAS_URL = "ここにGASのWebアプリURL";
+  <div id="status" role="status" aria-live="polite">
+    読み取り待機中です。
+  </div>
 
-let html5QrCode;
-let isScanning = false;
+  <h2>直近の読み取り</h2>
+  <div id="lastResult">まだ読み取っていません。</div>
 
-function startScan() {
-  if (isScanning) return;
+  <script>
+    // ★ここを自分のGASウェブアプリURLに置き換える
+    const GAS_URL =
+      "https://script.google.com/a/macros/kadokawa.jp/s/AKfycbzpVKGDwFuy-rgYrPBHfAgeXGLHeW8NmkBb7UpszeWBwcjeMu8aLrnK-egYGne4ualu/exec";
 
-  html5QrCode = new Html5Qrcode("reader");
+    const statusElement = document.getElementById("status");
+    const lastResultElement = document.getElementById("lastResult");
+    const startButton = document.getElementById("startButton");
+    const stopButton = document.getElementById("stopButton");
 
-  html5QrCode.start(
-    { facingMode: "environment" },
-    { fps: 10, qrbox: 250 },
-    onScanSuccess
-  ).then(() => {
-    isScanning = true;
-  }).catch(err => {
-    document.getElementById("result").innerText = "カメラ起動失敗: " + err;
-  });
-}
+    let scanner = null;
+    let isRunning = false;
+    let isStarting = false;
+    let callbackCounter = 0;
+    let lastValue = "";
+    let lastScannedAt = 0;
 
-function stopScan() {
-  if (!isScanning) return;
+    function setStatus(message) {
+      statusElement.textContent = message;
+    }
 
-  html5QrCode.stop().then(() => {
-    isScanning = false;
-  });
-}
+    async function startCamera() {
+      if (isRunning || isStarting) return;
 
-function onScanSuccess(decodedText) {
-  document.getElementById("result").innerText = "送信中: " + decodedText;
+      if (
+        !GAS_URL.startsWith("https://script.google.com/macros/s/") ||
+        !GAS_URL.endsWith("/exec")
+      ) {
+        setStatus("GAS_URLに正しいウェブアプリURLを設定してください。");
+        return;
+      }
 
-  fetch(GAS_URL, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json"
-    },
-    body: JSON.stringify({ qr: decodedText })
-  })
-  .then(() => {
-    document.getElementById("result").innerText = "記録しました: " + decodedText;
-  });
-}
-</script>
+      if (typeof Html5Qrcode === "undefined") {
+        setStatus("QR読み取りライブラリを読み込めませんでした。通信を確認してください。");
+        return;
+      }
 
+      isStarting = true;
+      startButton.disabled = true;
+      setStatus("カメラを起動しています。許可を求められたら許可してください。");
+
+      try {
+        scanner = new Html5Qrcode("reader");
+
+        await scanner.start(
+          { facingMode: "environment" },
+          {
+            fps: 10,
+            qrbox: { width: 250, height: 250 }
+          },
+          onScanSuccess,
+          () => {}
+        );
+
+        isRunning = true;
+        stopButton.disabled = false;
+        setStatus("カメラ起動中です。QRコードをかざしてください。");
+      } catch (error) {
+        scanner = null;
+        setStatus(
+          "カメラを起動できませんでした。\n" +
+          String(error) +
+          "\n\nSafariのカメラ設定と、ページがHTTPSで開かれていることを確認してください。"
+        );
+      } finally {
+        isStarting = false;
+        startButton.disabled = isRunning;
+      }
+    }
+
+    async function stopCamera() {
+      if (!scanner || !isRunning) return;
+
+      stopButton.disabled = true;
+
+      try {
+        await scanner.stop();
+        await scanner.clear();
+        setStatus("カメラを停止しました。");
+      } catch (error) {
+        setStatus("カメラ停止時にエラーが発生しました: " + String(error));
+      } finally {
+        scanner = null;
+        isRunning = false;
+        startButton.disabled = false;
+      }
+    }
+
+    function onScanSuccess(decodedText) {
+      const now = Date.now();
+
+      // 同じQRコードの連続検出による重複記録を抑制
+      if (decodedText === lastValue && now - lastScannedAt < 3000) {
+        return;
+      }
+
+      lastValue = decodedText;
+      lastScannedAt = now;
+
+      lastResultElement.textContent = decodedText;
+      setStatus("QRコードを読み取りました。Googleドキュメントに記録中です…");
+
+      saveToGoogleDoc(decodedText);
+    }
+
+    function saveToGoogleDoc(value) {
+      const callbackName =
+        "qrCallback_" + Date.now() + "_" + (++callbackCounter);
+
+      const script = document.createElement("script");
+      let finished = false;
+
+      const timeoutId = setTimeout(() => {
+        finish();
+        setStatus(
+          "応答を確認できませんでした。記録されたかどうか、Googleドキュメントを確認してください。"
+        );
+      }, 20000);
+
+      function finish() {
+        if (finished) return;
+        finished = true;
+        clearTimeout(timeoutId);
+        script.remove();
+        delete window[callbackName];
+      }
+
+      window[callbackName] = function(result) {
+        if (finished) return;
+        finish();
+
+        if (result && result.ok) {
+          setStatus(
+            "記録しました。\n日時: " + result.timestamp +
+            "\n次のQRコードを読み取れます。"
+          );
+        } else {
+          setStatus(
+            "Googleドキュメントへの記録に失敗しました。\n" +
+            (result && result.error ? result.error : "原因を特定できませんでした。")
+          );
+        }
+      };
+
+      script.onerror = function() {
+        if (finished) return;
+        finish();
+        setStatus(
+          "GASとの通信に失敗しました。ウェブアプリURLと公開設定を確認してください。"
+        );
+      };
+
+      const params = new URLSearchParams({
+        action: "save",
+        value: value,
+        callback: callbackName,
+        _: String(Date.now())
+      });
+
+      script.src = GAS_URL + "?" + params.toString();
+      script.async = true;
+      document.head.appendChild(script);
+    }
+
+    startButton.addEventListener("click", startCamera);
+    stopButton.addEventListener("click", stopCamera);
+  </script>
 </body>
 </html>
