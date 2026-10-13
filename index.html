@@ -99,7 +99,7 @@
       if (isRunning || isStarting) return;
 
       if (
-        !GAS_URL.startsWith("https://script.google.com/macros/s/") ||
+        !GAS_URL.startsWith("https://script.google.com/macros/") ||
         !GAS_URL.endsWith("/exec")
       ) {
         setStatus("GAS_URLに正しいウェブアプリURLを設定してください。");
