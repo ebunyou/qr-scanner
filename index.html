@@ -98,19 +98,6 @@
     async function startCamera() {
       if (isRunning || isStarting) return;
 
- 
-if (
-  !/^https:\/\/script\.google\.com\/(?:a\/)?macros\/.*\/s\/[^/]+\/exec$/.test(
-    GAS_URL.trim()
-  )
-) {
-  setStatus(
-    "GAS_URLの形式を確認してください。デプロイ画面のウェブアプリURLをそのまま設定してください。"
-  );
-  return;
-}
-
-
       if (typeof Html5Qrcode === "undefined") {
         setStatus("QR読み取りライブラリを読み込めませんでした。通信を確認してください。");
         return;
