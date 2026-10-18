@@ -100,7 +100,7 @@
 
  
 if (
-  !/^https:\/\/script\.google\.com\/macros\/.*\/s\/[^/]+\/exec$/.test(
+  !/^https:\/\/script\.google\.com\/(?:a\/)?macros\/.*\/s\/[^/]+\/exec$/.test(
     GAS_URL.trim()
   )
 ) {
