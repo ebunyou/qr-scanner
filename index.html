@@ -1,379 +1,279 @@
-
 <!DOCTYPE html>
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
+
   <meta
     name="viewport"
-    content="width=device-width, initial-scale=1.0, viewport-fit=cover"
+    content="width=device-width, initial-scale=1.0"
   >
 
-  <title>QRコード記録</title>
+  <title>QRコードスキャナー</title>
 
-  <script src="https://unpkg.com/html5-qrcode" type="text/javascript"></script>
+  <script src="https://unpkg.com/html5-qrcode"></script>
 
   <style>
     body {
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-family: sans-serif;
       margin: 0;
       padding: 20px;
       background: #f5f5f5;
-      color: #222;
+      text-align: center;
     }
 
     h1 {
       font-size: 24px;
-      text-align: center;
-      margin: 10px 0 20px;
+      margin-bottom: 20px;
     }
 
     #reader {
       width: 100%;
       max-width: 500px;
-      margin: 0 auto;
+      margin: 0 auto 20px;
       background: white;
-      border-radius: 12px;
-      overflow: hidden;
     }
 
     #status {
-      max-width: 500px;
-      margin: 20px auto 0;
+      margin: 20px auto;
       padding: 15px;
-      background: white;
-      border-radius: 12px;
-      text-align: center;
-      line-height: 1.6;
-      word-break: break-word;
-    }
-
-    #lastResult {
       max-width: 500px;
-      margin: 15px auto 0;
-      padding: 15px;
       background: white;
-      border-radius: 12px;
+      border-radius: 8px;
       word-break: break-all;
     }
 
     button {
-      display: block;
-      width: 100%;
-      max-width: 500px;
-      margin: 15px auto 0;
-      padding: 15px;
       font-size: 18px;
+      padding: 12px 24px;
+      margin-top: 10px;
       border: none;
-      border-radius: 10px;
-      background: #333;
+      border-radius: 8px;
+      background: #4285f4;
       color: white;
+    }
+
+    button:disabled {
+      background: #aaa;
     }
   </style>
 </head>
 
 <body>
 
-  <h1>QRコード記録</h1>
+  <h1>QRコードスキャナー</h1>
 
   <div id="reader"></div>
 
   <div id="status">
-    カメラを起動しています...
+    QRコードをカメラに映してください。
   </div>
 
-  <div id="lastResult">
-    最後の読み取り：なし
-  </div>
-
-  <button id="startButton" type="button">
-    カメラを起動
+  <button id="restartButton" style="display:none;">
+    もう一度スキャン
   </button>
 
+
   <script>
-    // =========================================================
-    // ★ここだけ自分のGASウェブアプリURLにする
-    // =========================================================
 
-    const GAS_URL =
-      "https://script.google.com/macros/s/AKfycbzQX6QhuUZgQb2cIoVVesEoW-9NBYPXhqALZiB6Eba--TVDiGtz3AQ7M0ShSfZapQuH/exec";
+    /*
+     * ==========================================
+     * Googleフォーム設定
+     * ==========================================
+     */
+
+    const FORM_URL =
+      "https://docs.google.com/forms/d/e/1FAIpQLSei4G1ALsbPRFIn7pJ_Y-SvFpi03s0WuMHT4eT8_aIWSuLhZg/viewform";
+
+    const FORM_ENTRY =
+      "entry.2044249571";
 
 
-    // =========================================================
-    // 以下は基本的に変更不要
-    // =========================================================
-
-    const statusElement = document.getElementById("status");
-    const lastResultElement = document.getElementById("lastResult");
-    const startButton = document.getElementById("startButton");
+    /*
+     * ==========================================
+     * QRスキャナー
+     * ==========================================
+     */
 
     let html5QrCode = null;
-    let isScanning = false;
-    let isSaving = false;
+    let scanning = false;
+    let alreadyScanned = false;
+
+
+    const statusElement =
+      document.getElementById("status");
+
+    const restartButton =
+      document.getElementById("restartButton");
+
 
     function setStatus(message) {
       statusElement.textContent = message;
     }
 
-    function showLastResult(value) {
-      lastResultElement.textContent =
-        "最後の読み取り：" + value;
-    }
 
+    function startScanner() {
 
-    // =========================================================
-    // GASへQRコードを送信
-    // JSONPを使用するため、GitHub PagesとGASの
-    // ドメインが異なっていても通信できます。
-    // =========================================================
+      alreadyScanned = false;
 
-async function saveToGas(value) {
-
-  return new Promise(function(resolve, reject) {
-
-    const callbackName =
-      "gasCallback_" +
-      Date.now() +
-      "_" +
-      Math.floor(Math.random() * 100000);
-
-    let finished = false;
-
-    function cleanup() {
-      if (script && script.parentNode) {
-        script.parentNode.removeChild(script);
-      }
-
-      try {
-        delete window[callbackName];
-      } catch (e) {
-        window[callbackName] = undefined;
-      }
-    }
-
-    function finishSuccess(result) {
-      if (finished) return;
-
-      finished = true;
-      cleanup();
-
-      if (result && result.ok) {
-        resolve(result);
-      } else {
-        reject(
-          new Error(
-            result && result.error
-              ? result.error
-              : "GASで保存できませんでした。"
-          )
-        );
-      }
-    }
-
-    function finishError(message) {
-      if (finished) return;
-
-      finished = true;
-      cleanup();
-
-      reject(new Error(message));
-    }
-
-    window[callbackName] = function(result) {
-      finishSuccess(result);
-    };
-
-    const script = document.createElement("script");
-
-    const url =
-      GAS_URL +
-      "?action=save" +
-      "&value=" +
-      encodeURIComponent(value) +
-      "&callback=" +
-      encodeURIComponent(callbackName) +
-      "&_=" +
-      Date.now();
-
-    console.log("GAS URL:", url);
-
-    script.src = url;
-
-    script.onload = function() {
-
-      // JSONPでは、正常ならcallbackが呼ばれる。
-      // すぐにはエラー扱いにしない。
-      setTimeout(function() {
-
-        if (!finished) {
-          finishError(
-            "GASから正常な応答を受け取れませんでした。"
-          );
-        }
-
-      }, 3000);
-    };
-
-    script.onerror = function() {
-
-      finishError(
-        "GASとの通信に失敗しました。"
-      );
-    };
-
-    document.body.appendChild(script);
-
-    // 15秒でタイムアウト
-    setTimeout(function() {
-
-      if (!finished) {
-        finishError(
-          "GASとの通信がタイムアウトしました。"
-        );
-      }
-
-    }, 15000);
-  });
-}
-    // =========================================================
-    // QRコードを読み取ったとき
-    // =========================================================
-
-    async function onScanSuccess(decodedText) {
-
-      // 保存処理中なら無視
-      if (isSaving) {
-        return;
-      }
-
-      isSaving = true;
+      restartButton.style.display = "none";
 
       setStatus(
-        "QRコードを読み取りました。\nGASへ保存しています..."
+        "QRコードをカメラに映してください。"
       );
 
-      showLastResult(decodedText);
 
-      try {
-
-        const result = await saveToGas(decodedText);
-
-        setStatus(
-          "保存しました。\n" +
-          "日時: " +
-          result.timestamp +
-          "\n\n次のQRコードを読み取れます。"
-        );
-
-      } catch (error) {
-
-        console.error(error);
-
-        setStatus(
-          "GASへの保存に失敗しました。\n\n" +
-          error.message
-        );
-
-      } finally {
-
-        // 同じQRを連続して読み取らないように少し待つ
-        setTimeout(function() {
-          isSaving = false;
-        }, 2000);
-      }
-    }
+      html5QrCode =
+        new Html5Qrcode("reader");
 
 
-    // =========================================================
-    // QRコード読み取りエラー
-    // =========================================================
+      html5QrCode.start(
 
-    function onScanFailure(errorMessage) {
-      // QRコードがまだ見つからない場合は何もしない
-    }
+        {
+          facingMode: "environment"
+        },
 
-
-    // =========================================================
-    // カメラ起動
-    // =========================================================
-
-    async function startScanner() {
-
-      if (isScanning) {
-        return;
-      }
-
-      setStatus("カメラを起動しています...");
-
-      try {
-
-        html5QrCode = new Html5Qrcode("reader");
-
-        const config = {
+        {
           fps: 10,
           qrbox: {
             width: 250,
             height: 250
           }
-        };
+        },
 
-        // まず背面カメラを指定
-        await html5QrCode.start(
-          {
-            facingMode: "environment"
-          },
-          config,
-          onScanSuccess,
-          onScanFailure
-        );
+        onScanSuccess,
 
-        isScanning = true;
+        onScanFailure
 
-        setStatus(
-          "カメラ起動完了。\nQRコードを枠内に入れてください。"
-        );
+      ).then(function() {
 
-        startButton.style.display = "none";
+        scanning = true;
 
-      } catch (error) {
+      }).catch(function(error) {
 
-        console.error("Camera error:", error);
+        console.error(error);
 
         setStatus(
-          "カメラを起動できませんでした。\n\n" +
-          "iPhoneのChromeでカメラの使用を許可しているか確認してください。\n\n" +
-          "エラー: " +
-          error.message
+          "カメラを起動できませんでした。カメラの使用を許可してください。"
         );
-      }
+
+      });
+
     }
 
 
-    // =========================================================
-    // ボタン
-    // =========================================================
+    function onScanFailure(error) {
+      // QRが見つからない場合は何もしない
+    }
 
-    startButton.addEventListener(
+
+    async function onScanSuccess(decodedText) {
+
+      if (alreadyScanned) {
+        return;
+      }
+
+      alreadyScanned = true;
+
+      console.log(
+        "QRコード:",
+        decodedText
+      );
+
+
+      /*
+       * カメラを停止
+       */
+
+      if (
+        html5QrCode &&
+        scanning
+      ) {
+
+        try {
+
+          await html5QrCode.stop();
+
+          scanning = false;
+
+        } catch (error) {
+
+          console.error(
+            "カメラ停止エラー:",
+            error
+          );
+
+        }
+
+      }
+
+
+      /*
+       * Googleフォームの事前入力URLを作成
+       */
+
+      const formUrl =
+        FORM_URL +
+        "?usp=pp_url&" +
+        FORM_ENTRY +
+        "=" +
+        encodeURIComponent(decodedText);
+
+
+      console.log(
+        "GoogleフォームURL:",
+        formUrl
+      );
+
+
+      setStatus(
+        "QRコードを読み取りました。\n\n" +
+        decodedText +
+        "\n\nGoogleフォームを開きます..."
+      );
+
+
+      /*
+       * Googleフォームを開く
+       */
+
+      setTimeout(function() {
+
+        window.location.href = formUrl;
+
+      }, 500);
+
+    }
+
+
+    /*
+     * もう一度スキャン
+     */
+
+    restartButton.addEventListener(
       "click",
-      startScanner
-    );
-
-
-    // =========================================================
-    // ページ読み込み後に自動起動
-    // =========================================================
-
-    window.addEventListener(
-      "load",
       function() {
 
-        // 少し待ってから起動
-        setTimeout(
-          startScanner,
-          500
-        );
+        if (html5QrCode) {
+
+          try {
+            html5QrCode.clear();
+          } catch (e) {
+            console.log(e);
+          }
+
+        }
+
+        startScanner();
 
       }
     );
+
+
+    /*
+     * 起動
+     */
+
+    startScanner();
 
   </script>
 
