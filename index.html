@@ -126,76 +126,114 @@
     // ドメインが異なっていても通信できます。
     // =========================================================
 
-    function saveToGas(value) {
+async function saveToGas(value) {
 
-      return new Promise(function(resolve, reject) {
+  return new Promise(function(resolve, reject) {
 
-        const callbackName =
-          "gasCallback_" +
-          Date.now() +
-          "_" +
-          Math.floor(Math.random() * 100000);
+    const callbackName =
+      "gasCallback_" +
+      Date.now() +
+      "_" +
+      Math.floor(Math.random() * 100000);
 
-        const script = document.createElement("script");
+    let finished = false;
 
-        const timeout = setTimeout(function() {
-          cleanup();
-          reject(new Error("GASとの通信がタイムアウトしました。"));
-        }, 15000);
+    function cleanup() {
+      if (script && script.parentNode) {
+        script.parentNode.removeChild(script);
+      }
 
-        function cleanup() {
-          clearTimeout(timeout);
-
-          if (script.parentNode) {
-            script.parentNode.removeChild(script);
-          }
-
-          try {
-            delete window[callbackName];
-          } catch (e) {
-            window[callbackName] = undefined;
-          }
-        }
-
-        window[callbackName] = function(result) {
-
-          cleanup();
-
-          if (result && result.ok) {
-            resolve(result);
-          } else {
-            reject(
-              new Error(
-                result && result.error
-                  ? result.error
-                  : "GASで保存できませんでした。"
-              )
-            );
-          }
-        };
-
-        const url =
-          GAS_URL +
-          "?action=save" +
-          "&value=" +
-          encodeURIComponent(value) +
-          "&callback=" +
-          encodeURIComponent(callbackName) +
-          "&_=" +
-          Date.now();
-
-        script.src = url;
-
-        script.onerror = function() {
-          cleanup();
-          reject(new Error("GASとの通信に失敗しました。"));
-        };
-
-        document.body.appendChild(script);
-      });
+      try {
+        delete window[callbackName];
+      } catch (e) {
+        window[callbackName] = undefined;
+      }
     }
 
+    function finishSuccess(result) {
+      if (finished) return;
 
+      finished = true;
+      cleanup();
+
+      if (result && result.ok) {
+        resolve(result);
+      } else {
+        reject(
+          new Error(
+            result && result.error
+              ? result.error
+              : "GASで保存できませんでした。"
+          )
+        );
+      }
+    }
+
+    function finishError(message) {
+      if (finished) return;
+
+      finished = true;
+      cleanup();
+
+      reject(new Error(message));
+    }
+
+    window[callbackName] = function(result) {
+      finishSuccess(result);
+    };
+
+    const script = document.createElement("script");
+
+    const url =
+      GAS_URL +
+      "?action=save" +
+      "&value=" +
+      encodeURIComponent(value) +
+      "&callback=" +
+      encodeURIComponent(callbackName) +
+      "&_=" +
+      Date.now();
+
+    console.log("GAS URL:", url);
+
+    script.src = url;
+
+    script.onload = function() {
+
+      // JSONPでは、正常ならcallbackが呼ばれる。
+      // すぐにはエラー扱いにしない。
+      setTimeout(function() {
+
+        if (!finished) {
+          finishError(
+            "GASから正常な応答を受け取れませんでした。"
+          );
+        }
+
+      }, 3000);
+    };
+
+    script.onerror = function() {
+
+      finishError(
+        "GASとの通信に失敗しました。"
+      );
+    };
+
+    document.body.appendChild(script);
+
+    // 15秒でタイムアウト
+    setTimeout(function() {
+
+      if (!finished) {
+        finishError(
+          "GASとの通信がタイムアウトしました。"
+        );
+      }
+
+    }, 15000);
+  });
+}
     // =========================================================
     // QRコードを読み取ったとき
     // =========================================================
